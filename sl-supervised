@@ -1,0 +1,305 @@
+# Libraries
+
+library(dplyr)
+library(caret)
+library(factoextra)
+library(ggplot2)
+library(plotly) # Graphs
+library(ggfortify)
+library(cluster)
+library(plyr)
+library(tidymodels)
+library(predtools) # Tree
+library(magrittr)
+library(dplyr)
+library(baguette)
+library(rpart)
+library(rpart.plot)
+library(kknn)
+
+# - 
+# EDA
+
+df <- read.csv("data_supervised.csv")
+df$X <- NULL
+df <- na.omit(df)
+unique(df$label)
+count(df$label)
+
+
+# Removing 0 variance columns
+
+nearZeroVar(df)
+df <- df[,-nearZeroVar(df)]
+
+View(df)
+
+# PCA
+
+pca <- prcomp(df[-1], scale = TRUE, center = FALSE)
+get_eig(pca)
+
+plot(pca$x[,1], pca$x[,2])
+
+pca.var <- pca$sdev^2
+pca.var.per <- round(pca.var/sum(pca.var)*100, 1)
+
+# PCA Graph
+
+pca.data <- data.frame(y=as.factor(df$label),
+                       pc1 = pca$x[,1],
+                       pc2 = pca$x[,2])
+View(pca.data)
+count(pca.data$y)
+str(pca.data)
+
+ggplot(data=pca.data, aes(x=pc1, y=pc2, label=y, colour = y)) +
+  geom_text() +
+  xlab(paste("PC1 - ", pca.var.per[1], "%", sep="")) +
+  ylab(paste("PC2 - ", pca.var.per[2], "%", sep="")) +
+  theme_bw() +
+  ggtitle("PC Graph")
+
+# Plot distribution of the two principal components
+
+hist(pca.data$X) 
+hist(pca.data$Y) 
+
+# - 
+
+# Split 
+
+set.seed(123)
+split <- initial_split(pca.data, prop = 0.7, strata = y)
+train <- training(split)
+test <- testing(split)
+cv_folds <- vfold_cv(train, v = 10)
+
+# - 
+
+# K-NN
+
+knn_recipe <- recipe(y ~ ., data = train)
+
+knn_spec <- nearest_neighbor(neighbors = 3) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+knn_fit <- workflow() %>%
+  add_recipe(knn_recipe) %>% 
+  add_model(knn_spec) %>% 
+  fit(train)
+
+knn_predictions <- predict(knn_fit, test, type = "class")
+
+knn_combined <-  knn_predictions %>% 
+  mutate(true_class = test$y)
+
+conf_mat(data = knn_combined,
+         estimate = .pred_class,
+         truth = true_class)
+
+accuracy(knn_combined, 
+         estimate = .pred_class,
+         truth=true_class) # Accuracy 0,757
+
+plotk3 <- cbind(test, knn_predictions)
+
+ggplot(plotk3, aes(pc1, pc2, color = .pred_class)) + 
+  geom_point(size = 3) + 
+  ggtitle("KNN, K = 3") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "right")
+
+# K-NN CV + K Parameter Tuning
+
+set.seed(123)
+
+knn_spec_tune <- nearest_neighbor(neighbors=tune()) %>%
+                    set_engine("kknn") %>%
+                    set_mode("classification")
+
+knn_grid <- grid_regular(
+                hardhat::extract_parameter_set_dials(knn_spec_tune),
+                levels = 15)
+
+knn_tune_results <- tune_grid(knn_spec_tune,
+                              y ~ ., 
+                              resamples = cv_folds,
+                              grid = knn_grid,
+                              metrics = metric_set(accuracy))
+
+autoplot(knn_tune_results, metric="accuracy")
+
+knn_final_params <- select_best(knn_tune_results) # K = 15
+
+knn_best_spec <- finalize_model(knn_spec_tune, knn_final_params)
+
+knn_best_spec_fit <- knn_best_spec %>%
+                        fit(y~.,
+                            train)
+
+knn_best_predict <- predict(knn_best_spec_fit, test, type = "class")
+
+knn_predict_combined <- knn_best_predict %>% 
+                          mutate(true_class = test$y)
+
+conf_mat(data = knn_predict_combined,
+         estimate = .pred_class,
+         truth = true_class)
+
+accuracy(knn_predict_combined, 
+         estimate = .pred_class,
+         truth=true_class) # Accuracy 0.872, K = 15
+         
+plotk15 <- cbind(test, knn_best_predict)
+
+ggplot(plotk15, aes(pc1, pc2, color = .pred_class)) + 
+  geom_point(size = 3) + 
+  ggtitle("KNN, K = 15") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "right")
+  
+# - 
+
+# Tree
+
+tree_spec <- decision_tree(cost_complexity = 0.5,    # Random Parameters
+                            tree_depth = 7,
+                            min_n = 5) %>%
+                               set_engine("rpart") %>% 
+                              set_mode("classification")
+
+tree_fit <- tree_spec %>% fit(y~., train)
+
+tree_predictions <- predict(tree_fit, test, type="class")
+
+pred_combined <- tree_predictions %>% mutate(true_class = test$y)
+
+conf_mat(data = pred_combined,
+         estimate = .pred_class,
+         truth = true_class)
+
+accuracy(pred_combined, 
+         estimate = .pred_class,
+         truth=true_class) # Accuracy, 0.366
+
+# Decision Tree - CV
+
+fits_cv <- fit_resamples(tree_spec,
+                         y ~ .,
+                         resamples = cv_folds,
+                         metrics = metric_set(accuracy))
+
+all_errors <- collect_metrics(fits_cv, 
+                              summarize = FALSE)
+
+ggplot(all_errors, aes(x=id, y=.estimate)) + geom_bar(stat="identity")
+
+# Tree - Hyper Parameter Tuning 
+
+tree_spec_untuned <- decision_tree(
+                    cost_complexity = tune(),
+                    tree_depth = tune()) %>% 
+                    set_engine("rpart") %>% 
+                    set_mode("classification")
+
+tree_grid <- grid_regular(
+                hardhat::extract_parameter_set_dials(tree_spec_untuned),
+                levels = 10) 
+
+tree_tune_results <- tune_grid(
+                    tree_spec_untuned,
+                    y ~ .,
+                    resamples=cv_folds,
+                    grid=tree_grid,
+                    metrics=metric_set(accuracy))
+
+final_params <- select_best(tree_tune_results)
+
+best_spec <- finalize_model(tree_spec_untuned, final_params)
+
+autoplot(tree_tune_results, metric="accuracy")
+
+best_spec_fit <- best_spec %>% fit(y~., train)
+
+best_predict <- predict(best_spec_fit, test, type="class")
+
+predict_combined <- best_predict %>% mutate(true_class = test$y)
+
+conf_mat(data = predict_combined,
+         estimate = .pred_class,
+         truth = true_class)
+
+accuracy(predict_combined, 
+         estimate = .pred_class,
+         truth=true_class) # Increased 0.848  
+# Plot
+
+tune_fit <- rpart(y ~ . , 
+                  data = train, 
+                  method = 'class', 
+                  control = rpart.control(maxdepth = 4, cp = 0.01))
+
+rpart.plot(tune_fit)
+
+# Boosting
+
+set.seed(123)
+
+boost_spec <- boost_tree() %>%
+                set_mode("classification") %>%
+                    set_engine("xgboost")
+
+boost_model <- fit(boost_spec, 
+                    y ~ . ,
+                    train)
+
+boost_predict <- predict(boost_model, test, type="class")
+
+boost_predict_2 <- boost_predict %>% 
+  mutate(true_class = test$y)
+
+accuracy(boost_predict_2, 
+         estimate = .pred_class,
+         truth=true_class)         # Accuracy 0.852
+
+# Boosting Hp Tuning + CV 
+
+set.seed(123)
+
+boost_spec_tuning <- boost_tree(
+                        trees = 500,
+                        learn_rate = tune(),
+                        tree_depth = tune(),
+                        sample_size = tune()) %>%
+                          set_mode("classification") %>%
+                            set_engine("xgboost")
+
+tunegrid_boost <- grid_regular(
+                  hardhat::extract_parameter_set_dials(boost_spec_tuning),
+                  levels = 2)
+
+tune_boost_results <- tune_grid(boost_spec_tuning, 
+                                y ~ ., 
+                                resamples = cv_folds, 
+                                grid = tunegrid_boost,
+                                metrics = metric_set(accuracy))
+
+best_boost_param <- select_best(tune_boost_results)
+
+final_boost_spec <- finalize_model(boost_spec_tuning,
+                                   best_boost_param)
+
+final_boost_fit <- final_boost_spec %>%
+                      fit(y~.,
+                        data=train)
+
+final_boost_predict <- predict(final_boost_fit, test, type="class")
+
+final_boost_predict_2 <- final_boost_predict %>% 
+                            mutate(true_class = test$y)
+
+accuracy(final_boost_predict_2, 
+         estimate = .pred_class,
+         truth=true_class)           # Accuracy, 0.860
