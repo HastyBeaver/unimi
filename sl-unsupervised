@@ -1,0 +1,250 @@
+# Library
+
+library(stringr)
+library(factoextra) # Clustering
+library(ggpubr) 
+library(cluster) # Daisy Function for Gower Distance
+library(ggplot2)
+library(devtools)
+library(ggfortify)
+library(cluster)
+library(fpc)
+library(PCAmixdata)
+library(skimr)
+
+# -
+# Loading
+
+setwd("~/Desktop/sl projects/unsupervised")
+df <- read.csv("data_unsupervised.csv")
+df[11,9] <- 40
+df <- na.omit(df)
+
+# -
+# Data Cleaning, Encoding
+
+df$residence <- ifelse(df$residence == "Sì", 1, 0)
+#df$age_range <- factor(df$age_range, ordered = TRUE, levels = c("Under 19", "19-25", "26-35", "36-45","46-55", "Over 55"))
+
+df$meat_consumption <- lapply(df$meat_consumption, gsub, 
+                              pattern = "Spesso (carne, pesce e verdure sono bilanciate nella mia dieta - consumo carne e/o pesce 4-5 volte a settimana, uova e latticini quotidianamente)", 
+                              replacement = "often", 
+                              fixed = TRUE)
+df$meat_consumption <- lapply(df$meat_consumption, gsub, 
+                              pattern = "Raramente (sono vegetariano: non mangio carne e pesce, ma mangio uova e latticini)", 
+                              replacement = "rarely", 
+                              fixed = TRUE)
+df$meat_consumption <- lapply(df$meat_consumption, gsub, 
+                              pattern = "Ogni tanto (mangio regolarmente verdure e, occasionalmente, anche carne, pesce e derivati animali)", 
+                              replacement = "sometimes", 
+                              fixed = TRUE)
+df$meat_consumption <- lapply(df$meat_consumption, gsub, 
+                              pattern = "Molto spesso (mangio carne o pesce tutti i giorni)", 
+                              replacement = "always", 
+                              fixed = TRUE)
+
+df$meat_consumption <- factor(df$meat_consumption, 
+                              ordered = TRUE, 
+                              levels = c("never", "rarely", "sometimes", "often", "always"))
+
+df$fresh_food_cons <- lapply(df$fresh_food_cons, gsub, 
+                              pattern = "Oltre il ", 
+                              replacement = ">", 
+                              fixed = TRUE)
+
+df$fresh_food_cons <- lapply(df$fresh_food_cons, gsub, 
+                             pattern = "Meno del ", 
+                             replacement = "<", 
+                             fixed = TRUE)
+
+df$fresh_food_cons <- factor(df$fresh_food_cons, 
+                              ordered = TRUE, 
+                              levels = c("<25%", "25-50%", "50-75%", ">75%"))
+
+df$habitation_type <- sapply(df$habitation_type, gsub, 
+                             pattern = "Casa unifamiliare", 
+                             replacement = "single family", 
+                             fixed = TRUE)
+
+df$habitation_type <- sapply(df$habitation_type, gsub, 
+                             pattern = "Casa a schiera o palazzina plurifamiliare (2-4 unità abitative)", 
+                             replacement = "multi family", 
+                             fixed = TRUE)
+
+df$habitation_type <- sapply(df$habitation_type, gsub, 
+                             pattern = "Casa popolare", 
+                             replacement = "council house", 
+                             fixed = TRUE)
+
+df$house_size <- lapply(df$house_size, gsub, 
+                             pattern = "Molto grande (oltre 170 mq)", 
+                             replacement = "very large", 
+                             fixed = TRUE)
+
+df$house_size <- lapply(df$house_size, gsub, 
+                        pattern = "Grande (111-170 mq)", 
+                        replacement = "large", 
+                        fixed = TRUE)
+
+df$house_size <- lapply(df$house_size, gsub, 
+                        pattern = "Media (21-50 mq)", 
+                        replacement = "normal", 
+                        fixed = TRUE)
+
+df$house_size <- lapply(df$house_size, gsub, 
+                        pattern = "Piccola (fino a 20 mq)", 
+                        replacement = "small", 
+                        fixed = TRUE)
+
+df$house_size <- lapply(df$house_size, gsub, 
+                        pattern = "Piccola (fino a 20 mq)", 
+                        replacement = "small", 
+                        fixed = TRUE)
+
+df$house_size <- factor(df$house_size, 
+                        ordered = TRUE, 
+                        levels = c("small", "normal", "large", "very large"))
+
+df$house_energy_efficiency <- lapply(df$house_energy_efficiency, gsub, 
+                        pattern = "Sopra alla media (ottima coibentazione, lampade e elettrodomestici altamente efficienti, uso consapevole dell'energia)", 
+                        replacement = "above average", 
+                        fixed = TRUE)
+
+df$house_energy_efficiency <- lapply(df$house_energy_efficiency, gsub, 
+                                     pattern = "Inferiore alla media (lampade poco efficienti, 
+                                     elettrodomestici standard)", 
+                                     replacement = "below average", 
+                                     fixed = TRUE)
+
+df$house_energy_efficiency <- lapply(df$house_energy_efficiency, gsub, 
+                                     pattern = "Nella media (elettrodomestici e riscaldamento / climatizzazione moderni)", 
+                                     replacement = "average", 
+                                     fixed = TRUE)
+
+df$house_energy_efficiency <- lapply(df$house_energy_efficiency, gsub, 
+                                     pattern = "Molto inefficiente (scarsa coibentazione, solo poche lampade a LED, sistemi di riscaldamento / climatizzazione usati spesso)", 
+                                     replacement = "inefficient", 
+                                     fixed = TRUE)
+
+df$house_energy_efficiency <- lapply(df$house_energy_efficiency, gsub, 
+                                     pattern = "Design incentrato sull'efficienza (riscaldamento / climatizzazione passivi, controllo avanzato della temperatura e ventilazione, basso consumo di elettricità)", 
+                                     replacement = "efficient", 
+                                     fixed = TRUE)
+
+
+
+df$house_energy_efficiency <- lapply(df$house_energy_efficiency, gsub, 
+                                     pattern = "Inferiore alla media (lampade poco efficienti, elettrodomestici standard)", 
+                                     replacement = "below average", 
+                                     fixed = TRUE)
+
+df$house_energy_efficiency <- factor(df$house_energy_efficiency, 
+                             ordered = TRUE, 
+                             levels = c("inefficient", "below average", "average", "above average", "efficient"))
+
+df$person_per_travel <- lapply(df$person_per_travel, gsub, 
+                                     pattern = "Sempre", 
+                                     replacement = "always", 
+                                     fixed = TRUE)
+df$person_per_travel <- lapply(df$person_per_travel, gsub, 
+                               pattern = "Spesso", 
+                               replacement = "often", 
+                               fixed = TRUE)
+df$person_per_travel <- lapply(df$person_per_travel, gsub, 
+                               pattern = "Ogni tanto", 
+                               replacement = "sometimes", 
+                               fixed = TRUE)
+df$person_per_travel <- lapply(df$person_per_travel, gsub, 
+                               pattern = "Raramente", 
+                               replacement = "rarely", 
+                               fixed = TRUE)
+df$person_per_travel <- lapply(df$person_per_travel, gsub, 
+                               pattern = "Mai", 
+                               replacement = "never", 
+                               fixed = TRUE)
+
+df$person_per_travel <- factor(df$person_per_travel, 
+                                     ordered = TRUE, 
+                                     levels = c("never", "rarely", "sometimes", "often", "always"))
+
+df$weekly_car_km <- as.numeric(df$weekly_car_km)
+df$km_public <- as.numeric(df$km_public)
+df$yearly_flight_hours <- as.numeric(df$yearly_flight_hours)
+df$car_type <- as.factor(df$car_type)
+df$habitation_type <- as.factor(df$habitation_type)
+df$age_range <- as.factor(df$age_range)
+df$residence <- as.factor(df$residence)
+
+str(df)
+
+View(df)
+
+skim(df)
+
+df[df$weekly_car_km == 25000, "weekly_car_km"] <- 250
+
+# - 
+# Graphs 
+
+pie(table(df$residence), labels=c("Non Resident", "Resident"), main = "Residence Pie Plot")
+
+ggplot(df, aes(x=age_range)) + geom_bar(fill = "aquamarine4") + ggtitle("Age Range")
+
+ggplot(df, aes(x=fresh_food_cons)) + geom_bar(fill = "cornflowerblue") + ggtitle("Fresh Food Consumption")
+
+ggplot(df, aes(x=weekly_car_km)) + geom_histogram(fill="black", 
+                                                  colour="green", 
+                                                  alpha = 0.25) + ggtitle("Weekly Car Km")
+
+ggplot(df, aes(x=km_public)) + geom_histogram(fill="black", 
+                                                  colour="blue", 
+                                                  alpha = 0.25) + 
+                                                  ggtitle("Weekly Public Transportation Km")
+
+ggplot(df, aes(x=yearly_flight_hours)) + geom_histogram(col="yellow", 
+                                                    alpha = 0.5) +
+                                                    ggtitle("Yearly Flight Hours")
+                                                    
+# - 
+# Gower Distance + PAM Clustering
+
+daisy_matrix <- as.matrix(daisy(df, metric="gower"))
+
+pamk <- pamk(daisy_matrix, krange=2:50, criterion="asw", usepam=TRUE, 
+                        scaling=TRUE, diss=TRUE, critout=FALSE) 
+
+pam <- pam(daisy_matrix, diss = TRUE, k = 2)
+
+fviz_cluster(object = list(data=daisy_matrix, 
+                              cluster = pam$clustering), 
+                              geom = c("point", "text"), 
+                              ellipse.type ="convex", 
+                              stand = FALSE)
+
+fviz_silhouette(silhouette(pam))
+
+# PCA Mix
+
+quantitative <- c("tentants", "weekly_car_km", "km_public", "yearly_flight_hours")
+qualitative <- c("residence", "age_range", "meat_consumption", "fresh_food_cons", 
+                 "habitation_type", "house_size", "house_energy_efficiency", 
+                 "car_type", "person_per_travel")
+
+df_quantitative <- df[, quantitative]
+df_qualitative <- df[, qualitative]
+
+res.pcamix <- PCAmix(X.quanti = df_quantitative,
+                  X.quali = df_qualitative, 
+                  rename.level = TRUE)
+
+res.pcamix$eig
+
+plot(res.pcamix,choice="ind", label=TRUE,
+        posleg="bottomright", main="Principal Component Map")
+
+plot(res.pcamix,choice="levels",xlim=c(-1.5,2.5), main="Level Map")
+
+plot(res.pcamix,choice="cor",main="Correlation Circle") 
+
+plot(res.pcamix,choice="sqload",coloring.var=T, leg=TRUE,
+        posleg="topright", main="Squared Loading Plot")
